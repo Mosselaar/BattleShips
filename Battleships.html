@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Battleships</title>
+    <style>
+      canvas {
+        margin-left: 10px;
+        background-color: #ccc;
+        border-top: 3px solid #ccc;
+        border-left: 3px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="mySea" width="600" height="600"></canvas>
+    <canvas id="enemySea" width="600" height="600"></canvas>
+    <button type="button" id="changeDirectionBoatPlacement">
+      Change Direction
+    </button>
+    <div id="destroyedShips">Which ships did you sink:</div>
+    <div id="hintPlace">Hint: Place a boat of 2 squares</div>
+
+    <script>
+      // hiermee verder gegaan
+      var enemySquares = [];
+      var mySquares = [];
+
+      var myCanvas = document.getElementById("mySea");
+      var myContext = myCanvas.getContext("2d");
+
+      var enemyCanvas = document.getElementById("enemySea");
+      var enemyContext = enemyCanvas.getContext("2d");
+
+      var gapSize = 3; /* pixels between each square  */
+      var numRows = 12; /* number of squares that fit in the canvas vertically  */
+      var numColumns = numRows; /* a sea always has equal length and width  */
+      var squareSize = getSquareSize();
+
+      // var shipSizes = [2,5,4,3,3]
+      var shipSizes = [
+        { name: "destroyer", proportion: 2 },
+        { name: "cruiser1", proportion: 3 },
+        { name: "cruiser2", proportion: 3 },
+        { name: "battleship", proportion: 4 },
+        { name: "aircraftcarier", proportion: 5 },
+      ];
+      var currentShipIndex = 0;
+      var currentShipIndexEnemy = 0;
+
+      var myHits = 0;
+      var enemyHits = 0;
+
+      var placingShipsHorizontallyEnemy;
+      var placingShipsHorizontally = true; /* this used to be a variable called 'orientation' */
+
+      /*
+This function calcualates the size of a squares inside of a canvas.
+*/
+      function getSquareSize() {
+        var canvasWidth = myCanvas.width;
+        var optimalSquareSize = canvasWidth / numRows - gapSize;
+        return optimalSquareSize;
+      }
+
+      /*
+The function creates "square objects" that contain all properties of a given square. Function should only be used for squares of the user's sea.
+The "draw" method draws the square on the canvas.
+The "isClicked" returns true if the coordinates passed as a parameter overlap the square.
+The "getColor" returns the color the square based on state.
+*/
+      function createFriendlyGridSquare(rowNumber, columnNumber) {
+        var square = {
+          rowNr: rowNumber,
+          columnNr: columnNumber,
+          state: "water",
+          getColor: mySeaColors,
+          draw: drawSquare,
+          changeState: changeSquareStateAndRedraw,
+          isClicked: coordinatesOverlap,
+          // name: string,
+        };
+        return square;
+      }
+
+      /*
+The enemySquares array already has all coordinates in it, but the functions are lacking. This function inserts all methods into an enemy square.
+*/
+      function insertEnemyGameMethods(squareIndex) {
+        enemySquares[squareIndex].getColor = enemySeaColors;
+        enemySquares[squareIndex].draw = drawSquare;
+        enemySquares[squareIndex].changeState = changeSquareStateAndRedraw;
+        enemySquares[squareIndex].isClicked = coordinatesOverlap;
+      }
+
+      /*
+Method: draws a square on a canvas context.
+*/
+      function drawSquare(context) {
+        var x = this.columnNr * (squareSize + gapSize);
+        var y = this.rowNr * (squareSize + gapSize);
+        context.beginPath();
+        context.fillStyle = this.getColor();
+        context.rect(x, y, squareSize, squareSize);
+        context.fill();
+        context.font = "bold 10px sans-serif";
+        context.fillStyle =
+          "rgba(255, 255, 255, 0.8)"; /* semi-transparent white */
+        var squareIndex = this.rowNr * numColumns + this.columnNr;
+        context.fillText(squareIndex, x + 5, y + 15);
+        if (
+          this.state == "cruiser1" ||
+          this.state == "cruiser2" ||
+          this.state == "battleship" ||
+          this.state == "destroyer" ||
+          this.state == "aircraftcarier"
+        ) {
+          context.fillText(this.state, x + 1, y + 30);
+        }
+        //context.fillText()
+        /* TIP: you can add fillText commands here to show more info (such as state, 
+            or ship name) in each square
+    */
+      }
+
+      /*
+Method: changes the state of the square and redraws it.
+*/
+      function changeSquareStateAndRedraw(newState, context) {
+        this.state = newState;
+        this.draw(context);
+      }
+
+      /*
+Method: returns true if the given coordinates overlap the square.
+*/
+      function coordinatesOverlap(x, y) {
+        var squareX = this.columnNr * (squareSize + gapSize);
+        var squareY = this.rowNr * (squareSize + gapSize);
+        var fitsHorizontally = x >= squareX && x <= squareX + squareSize;
+        var fitsVertically = y >= squareY && y <= squareY + squareSize;
+        return fitsHorizontally && fitsVertically;
+      }
+
+      /*
+Method: In the player's sea, ships are yellow
+*/
+      function mySeaColors() {
+        if (this.state == "water") {
+          return "mediumslateblue";
+        } else if (this.state == "miss") {
+          return "lightcoral";
+        } else if (this.state == "hit") {
+          return "palegreen";
+        } else {
+          return "silver";
+        }
+      }
+
+      /*
+Method: In the enemy sea, ships are blue (same as the sea)
+*/
+      function enemySeaColors() {
+        if (this.state == "water") {
+          return "darkslateblue";
+        } else if (this.state == "miss") {
+          return "crimson";
+        } else if (this.state == "hit") {
+          return "seagreen";
+        } else {
+          return "midnightblue";
+          // return "darkslateblue"
+        }
+      }
+
+      /*
+Function checks whether a ship is allowed to be placed on a certain starting position..
+*/
+      function isValidPosition(firstSquareIndex, currentShipSize) {
+        var isValid = true;
+        if (placingShipsHorizontally) {
+          /* ships should not cross the border */
+          var colNr = mySquares[firstSquareIndex].columnNr;
+          var numAvailableSquares = numColumns - colNr;
+          if (numAvailableSquares < currentShipSize) {
+            isValid = false;
+          }
+          /* ships shouldn't overlap */
+          for (
+            var i = firstSquareIndex;
+            i < firstSquareIndex + currentShipSize;
+            i++
+          ) {
+            if (
+              mySquares[i] != undefined &&
+              (mySquares[i].state == "destroyer" ||
+                mySquares[i].state == "cruiser1" ||
+                mySquares[i].state == "cruiser2" ||
+                mySquares[i].state == "battleship" ||
+                mySquares[i].state == "aircraftcarier")
+            ) {
+              isValid = false;
+            }
+          }
+        } else {
+          var rowNr = mySquares[firstSquareIndex].rowNr;
+          var numAvailableSquares = numRows - rowNr;
+          if (numAvailableSquares < currentShipSize) {
+            isValid = false;
+          }
+          /* ships shouldn't overlap */
+          for (
+            var i = firstSquareIndex;
+            i < firstSquareIndex + currentShipSize * numRows;
+            i += numRows
+          ) {
+            if (
+              mySquares[i] != undefined &&
+              (mySquares[i].state == "destroyer" ||
+                mySquares[i].state == "cruiser1" ||
+                mySquares[i].state == "cruiser2" ||
+                mySquares[i].state == "battleship" ||
+                mySquares[i].state == "aircraftcarier")
+            ) {
+              isValid = false;
+            }
+          }
+
+          /* TODO: make it work for when the ship will be placed vertically */
+        }
+        return isValid;
+      }
+      /*
+Place a ship, by changing the state of squares.
+Starting on the firstSquareIndex but with a length depending on the length of the current ship.
+*/
+      function placeShip(firstSquareIndex) {
+        var currentShipName = shipSizes[currentShipIndex].name;
+        var currentShipSize = shipSizes[currentShipIndex].proportion;
+        if (
+          isValidPosition(firstSquareIndex, currentShipSize) &&
+          placingShipsHorizontally == true
+        ) {
+          for (
+            var i = firstSquareIndex;
+            i < firstSquareIndex + currentShipSize;
+            i++
+          ) {
+            mySquares[i].changeState(currentShipName, myContext);
+            console.log("click");
+          }
+          currentShipIndex += 1;
+          placeHint(currentShipIndex);
+          console.log(currentShipIndex);
+        } else if (
+          isValidPosition(firstSquareIndex, currentShipSize) &&
+          placingShipsHorizontally == false
+        ) {
+          for (
+            var i = firstSquareIndex;
+            i < firstSquareIndex + currentShipSize * numRows;
+            i += numRows
+          ) {
+            mySquares[i].changeState(currentShipName, myContext);
+            console.log("click");
+          }
+          //placeHint(currentShipIndex)
+
+          currentShipIndex += 1;
+          placeHint(currentShipIndex);
+          console.log(currentShipIndex);
+        }
+
+        /* TODO: this function must also be able to place ships vertically */
+      }
+
+      /*
+Creates a data-structure for the player's sea, without any ships in it. 
+Also draws each square after it's object has been added to the data-structure.
+*/
+      function createMySea() {
+        for (var rowNumber = 0; rowNumber < numRows; rowNumber++) {
+          for (columnNumber = 0; columnNumber < numRows; columnNumber++) {
+            var square = createFriendlyGridSquare(rowNumber, columnNumber);
+            square.draw(myContext);
+            mySquares.push(square);
+          }
+        }
+      }
+
+      /*
+Creates the data-structure for the enemy sea, based on the pre-filled enemySquares array. 
+Also inserts methods into the objects in that array.
+And draws each square after it's object has been added to the data-structure.
+*/
+      function createEnemySea() {
+        for (rowNumber = 0; rowNumber < numRows; rowNumber++) {
+          for (columnNumber = 0; columnNumber < numRows; columnNumber++) {
+            var squareIndex = rowNumber * numColumns + columnNumber;
+            enemySquares[squareIndex] = {
+              state: "water",
+              rowNr: rowNumber,
+              columnNr: columnNumber,
+            }; // toegevoegd
+            insertEnemyGameMethods(squareIndex);
+            enemySquares[squareIndex].draw(enemyContext);
+          }
+        }
+      }
+
+      /*
+Plays a turn human turn based on x and y coordinates (coming from a click).
+*/
+      function playHumanTurn(mouseX, mouseY) {
+        for (var i = 0; i < enemySquares.length; i++) {
+          if (enemySquares[i].isClicked(mouseX, mouseY)) {
+            if (enemySquares[i].state == "water") {
+              enemySquares[i].changeState("miss", enemyContext);
+            } else if (enemySquares[i].state == "destroyer") {
+              enemySquares[i].changeState("hit", enemyContext);
+
+              myHits++;
+              whoWon();
+              checkForDestroyedShips("destroyer");
+            } else if (enemySquares[i].state == "cruiser1") {
+              enemySquares[i].changeState("hit", enemyContext);
+
+              myHits++;
+              whoWon();
+              checkForDestroyedShips("cruiser1");
+            } else if (enemySquares[i].state == "cruiser2") {
+              enemySquares[i].changeState("hit", enemyContext);
+
+              myHits++;
+              whoWon();
+              checkForDestroyedShips("cruiser2");
+            } else if (enemySquares[i].state == "battleship") {
+              enemySquares[i].changeState("hit", enemyContext);
+
+              myHits++;
+              whoWon();
+              checkForDestroyedShips("battleship");
+            } else if (enemySquares[i].state == "aircraftcarier") {
+              enemySquares[i].changeState("hit", enemyContext);
+
+              myHits++;
+              whoWon();
+              checkForDestroyedShips("aircraftcarier");
+            } else {
+              playHumanTurn(mouseX, mouseY);
+            }
+          }
+        }
+      }
+
+      /*
+The computer throws a bomb at random at your sea.
+*/
+      function playComputerTurn() {
+        var targetIndex = Math.floor(Math.random() * numRows * numRows);
+        if (mySquares[targetIndex].state == "water") {
+          mySquares[targetIndex].changeState("miss", myContext);
+        } else if (mySquares[targetIndex].state == "destroyer") {
+          mySquares[targetIndex].changeState("hit", myContext);
+          whoWon();
+          enemyHits++;
+        } else if (mySquares[targetIndex].state == "cruiser1") {
+          mySquares[targetIndex].changeState("hit", myContext);
+          whoWon();
+          enemyHits++;
+        } else if (mySquares[targetIndex].state == "cruiser2") {
+          mySquares[targetIndex].changeState("hit", myContext);
+          whoWon();
+          enemyHits++;
+        } else if (mySquares[targetIndex].state == "battleship") {
+          mySquares[targetIndex].changeState("hit", myContext);
+          whoWon();
+          enemyHits++;
+        } else if (mySquares[targetIndex].state == "aircraftcarier") {
+          mySquares[targetIndex].changeState("hit", myContext);
+          whoWon();
+          enemyHits++;
+        } else {
+          playComputerTurn();
+        }
+      }
+
+      /*
+The "clickEvent" parameter refers to the "click event" triggering this function. This event is an object containing all sorts of information concerning the click. Coordinates is one of those pieces of information.
+The function attempts to place a ship.
+If there are no more ships to be placed, the function draws the enemy sea and starts the game.
+*/
+      function gameSetupRound(clickEvent) {
+        mouseX = clickEvent.offsetX;
+        mouseY = clickEvent.offsetY;
+        //placeHint(currentShipIndex)
+        console.log("gameSetup:" + currentShipIndex);
+        /* Check to sea whether or not the click was on one of the squares */
+        for (var i = 0; i < mySquares.length; i++) {
+          if (mySquares[i].isClicked(mouseX, mouseY)) {
+            placeShip(i);
+            if (currentShipIndex == shipSizes.length) {
+              createEnemySea();
+              randomShipPlacement();
+              /* Change the onclick listeners to start the game. */
+              document.getElementById("enemySea").onclick = playRound;
+              document.getElementById("mySea").onclick = "";
+            }
+          }
+        }
+      }
+
+      /*
+This is the actual game. Function is triggered with a clickEvent.
+The clickEvent parameter is the click event containing the coordinates of the click.
+*/
+      function playRound(clickEvent) {
+        mouseX = clickEvent.offsetX;
+        mouseY = clickEvent.offsetY;
+        playHumanTurn(mouseX, mouseY);
+        playComputerTurn();
+      }
+
+      function placeHint(round) {
+        if (round <= 4) {
+          document.getElementById("hintPlace").innerHTML =
+            "Place " +
+            shipSizes[round].name +
+            " of length " +
+            shipSizes[round].proportion;
+        } else {
+          document.getElementById("hintPlace").innerHTML = "bomb";
+        }
+      }
+
+      function isValidPositionEnemy(
+        firstSquareIndexEnemy,
+        currentShipSize,
+        placingShipsHorizontallyEnemy
+      ) {
+        var isValid = true;
+        if (placingShipsHorizontallyEnemy == 1) {
+          /* ships should not cross the border */
+          var colNr = enemySquares[firstSquareIndexEnemy].columnNr;
+          var numAvailableSquares = numColumns - colNr;
+          if (numAvailableSquares < currentShipSize) {
+            isValid = false;
+          }
+          /* ships shouldn't overlap */
+          for (
+            var i = firstSquareIndexEnemy;
+            i < firstSquareIndexEnemy + currentShipSize;
+            i++
+          ) {
+            if (
+              enemySquares[i] != undefined &&
+              (enemySquares[i].state == "destroyer" ||
+                enemySquares[i].state == "cruiser1" ||
+                enemySquares[i].state == "cruiser2" ||
+                enemySquares[i].state == "battleship" ||
+                enemySquares[i].state == "aircraftcarier")
+            ) {
+              isValid = false;
+            }
+          }
+        } else if (placingShipsHorizontallyEnemy == 0) {
+          var rowNr = enemySquares[firstSquareIndexEnemy].rowNr;
+          var numAvailableSquares = numRows - rowNr;
+          if (numAvailableSquares < currentShipSize) {
+            isValid = false;
+          }
+          /* ships shouldn't overlap */
+          for (
+            var i = firstSquareIndexEnemy;
+            i < firstSquareIndexEnemy + currentShipSize * numRows;
+            i += numRows
+          ) {
+            if (
+              enemySquares[i] != undefined &&
+              (enemySquares[i].state == "destroyer" ||
+                enemySquares[i].state == "cruiser1" ||
+                enemySquares[i].state == "cruiser2" ||
+                enemySquares[i].state == "battleship" ||
+                enemySquares[i].state == "aircraftcarier")
+            ) {
+              isValid = false;
+            }
+          }
+        }
+        return isValid;
+      }
+
+      function placeShipEnemy(
+        firstSquareIndexEnemy,
+        placingShipsHorizontallyEnemy
+      ) {
+        var currentShipName = shipSizes[currentShipIndexEnemy].name;
+        var currentShipSize = shipSizes[currentShipIndexEnemy].proportion;
+        if (
+          isValidPositionEnemy(
+            firstSquareIndexEnemy,
+            currentShipSize,
+            placingShipsHorizontallyEnemy
+          ) &&
+          placingShipsHorizontallyEnemy == 1
+        ) {
+          for (
+            var i = firstSquareIndexEnemy;
+            i < firstSquareIndexEnemy + currentShipSize;
+            i++
+          ) {
+            enemySquares[i].changeState(currentShipName, enemyContext);
+          }
+          currentShipIndexEnemy += 1;
+          console.log(currentShipIndexEnemy);
+        } else if (
+          isValidPositionEnemy(
+            firstSquareIndexEnemy,
+            currentShipSize,
+            placingShipsHorizontallyEnemy
+          ) &&
+          placingShipsHorizontallyEnemy == 0
+        ) {
+          for (
+            var i = firstSquareIndexEnemy;
+            i < firstSquareIndexEnemy + currentShipSize * numRows;
+            i += numRows
+          ) {
+            enemySquares[i].changeState(currentShipName, enemyContext);
+            console.log("click");
+          }
+          currentShipIndexEnemy += 1;
+          console.log(currentShipIndexEnemy);
+        }
+        /* TODO: this function must also be able to place ships vertically */
+      }
+
+      function randomShipPlacement() {
+        while (currentShipIndexEnemy < shipSizes.length) {
+          var randomLocation = Math.floor(Math.random() * 144);
+          var placingShipsHorizontallyEnemy = Math.floor(Math.random() * 2);
+          placeShipEnemy(randomLocation, placingShipsHorizontallyEnemy);
+        }
+      }
+
+      function changeDirection() {
+        if (placingShipsHorizontally == true) {
+          placingShipsHorizontally = false;
+        } else {
+          placingShipsHorizontally = true;
+        }
+        console.log("ChangeDirection: " + placingShipsHorizontally);
+      }
+
+      function whoWon() {
+        console.log("EnemyHits" + enemyHits);
+        console.log("myHits" + myHits);
+        if (myHits == 17) {
+          alert("YOU WON!");
+        }
+        if (enemyHits == 17) {
+          alert("Enemy won");
+        }
+      }
+
+      function checkForDestroyedShips(shipName) {
+        var shipIsAlive = false;
+        for (i = 0; i < enemySquares.length; i++) {
+          if (enemySquares[i].state == shipName) {
+            shipIsAlive = true;
+          }
+        }
+        writeDestroyedShips(shipIsAlive, shipName);
+      }
+
+      function writeDestroyedShips(shipIsAlive, shipName) {
+        if (shipIsAlive == false) {
+          document.getElementById("destroyedShips").innerHTML +=
+            shipName + ", ";
+        }
+      }
+
+      createMySea();
+      document.getElementById("mySea").onclick = gameSetupRound;
+      document.getElementById("changeDirectionBoatPlacement").onclick =
+        changeDirection;
+    </script>
+  </body>
+</html>
